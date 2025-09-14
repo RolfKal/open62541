@@ -444,6 +444,36 @@ UA_KeyValueMap_set(UA_KeyValueMap *map,
                                &UA_TYPES[UA_TYPES_KEYVALUEPAIR]);
 }
 
+UA_EXPORT UA_StatusCode
+UA_KeyValueMap_setShallow(UA_KeyValueMap *map,
+                          const UA_QualifiedName key,
+                          UA_Variant *value) {
+    if(map == NULL || value == NULL)
+        return UA_STATUSCODE_BADINVALIDARGUMENT;
+
+    /* Key exists already */
+    UA_Variant *target;
+    const UA_Variant *v = UA_KeyValueMap_get(map, key);
+    if(v) {
+        target = (UA_Variant*)(uintptr_t)v;
+        UA_Variant_clear(target);
+    } else {
+        /* Append to the array */
+        UA_KeyValuePair pair;
+        pair.key = key;
+        UA_Variant_init(&pair.value);
+        UA_StatusCode res =
+            UA_Array_appendCopy((void**)&map->map, &map->mapSize, &pair,
+                                &UA_TYPES[UA_TYPES_KEYVALUEPAIR]);
+        if(res != UA_STATUSCODE_GOOD)
+            return res;
+        target = &map->map[map->mapSize-1].value;
+    }
+
+    *target = *value;
+    return UA_STATUSCODE_GOOD;
+}
+
 UA_StatusCode
 UA_KeyValueMap_setScalar(UA_KeyValueMap *map,
                          const UA_QualifiedName key,
@@ -914,8 +944,6 @@ UA_String_escapeAppend(UA_String *s, const UA_String s2, UA_Escaping esc) {
     return UA_STATUSCODE_GOOD;
 }
 
-#ifdef UA_ENABLE_PARSING
-
 static UA_StatusCode
 moveTmpToOut(UA_String *tmp, UA_String *out) {
     /* Output has zero length */
@@ -1151,8 +1179,6 @@ UA_ReadValueId_print(const UA_ReadValueId *rvi, UA_String *out) {
 
     return moveTmpToOut(&tmp, out);
 }
-
-#endif
 
 /************************/
 /* Cryptography Helpers */
