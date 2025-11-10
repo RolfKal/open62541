@@ -523,7 +523,7 @@ mdns_create_txt(UA_DiscoveryManager *dm, const char *fullServiceDomain, const ch
     xht_free(h);
     mdnsd_set_raw(mdnsPrivateData.mdnsDaemon, r, (char *) packet,
                   (unsigned short) txtRecordLength);
-    UA_free(packet);
+    MDNSD_free(packet);
 }
 
 static mdns_record_t *
@@ -1147,7 +1147,7 @@ UA_DiscoveryManager_clearMdns(UA_DiscoveryManager *dm) {
 
 UA_UInt32
 UA_DiscoveryManager_getMdnsConnectionCount(void) {
-    return mdnsPrivateData.mdnsRecvConnectionsSize + (mdnsPrivateData.mdnsSendConnection != 0);
+    return (UA_UInt32)(mdnsPrivateData.mdnsRecvConnectionsSize + (mdnsPrivateData.mdnsSendConnection != 0));
 }
 
 void

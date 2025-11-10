@@ -22,6 +22,16 @@
 #include <open62541/types.h>
 #include <open62541/client.h>
 
+#include <open62541/plugin/log.h>
+#include <open62541/plugin/certificategroup.h>
+#include <open62541/plugin/eventloop.h>
+#include <open62541/plugin/accesscontrol.h>
+#include <open62541/plugin/securitypolicy.h>
+
+#ifdef UA_ENABLE_HISTORIZING
+#include <open62541/plugin/historydatabase.h>
+#endif
+
 #ifdef UA_ENABLE_PUBSUB
 #include <open62541/server_pubsub.h>
 #endif
@@ -186,6 +196,27 @@ UA_Server_removeCallback(UA_Server *server, UA_UInt64 callbackId);
 
 #define UA_Server_removeRepeatedCallback(server, callbackId) \
     UA_Server_removeCallback(server, callbackId)
+
+/**
+ * Application Notification
+ * ------------------------
+ * The server defines callbacks to notify the application on defined triggering
+ * points. These callbacks are executed with the (re-entrant) server-mutex held.
+ *
+ * The different types of callback are disambiguated by their type enum. Besides
+ * the global notification callback (which is always triggered), the server
+ * configuration contains specialized callbacks that trigger only for specific
+ * notifications. This can reduce the burden of high-frequency notifications.
+ *
+ * If a specialized notification callback is set, it always gets called before
+ * the global notification callback for the same triggering point.
+ *
+ * See the section on the :ref:`Application Notification` enum for more
+ * documentation on the notifications and their defined payload. */
+
+typedef void (*UA_ServerNotificationCallback)(UA_Server *server,
+                                              UA_ApplicationNotificationType type,
+                                              const UA_KeyValueMap payload);
 
 /**
  * .. _server-session-handling:
@@ -459,16 +490,80 @@ UA_Server_writeExecutable(UA_Server *server, const UA_NodeId nodeId,
                           const UA_Boolean executable);
 
 /**
+ * .. _server-method-call:
+ *
  * Method Service Set
  * ------------------
- * The Method Service Set defines the means to invoke methods. A MethodNode
- * shall be a component of an ObjectNode. Since the same MethodNode can be
- * referenced from multiple ObjectNodes, for calling a method, both method and
- * object need to be defined by their NodeId.
  *
- * The input and output arguments of a method are a list of ``UA_Variant``. The
- * type- and size-requirements of the arguments can be retrieved from the
- * **InputArguments** and **OutputArguments** variable below the MethodNode. */
+ * The Method Service Set defines the means to invoke methods. A MethodNode is a
+ * component of an ObjectNode or of an ObjectTypeNode. The input and output
+ * arguments of a method are a list of ``UA_Variant``. The type- and
+ * size-requirements of the arguments can be retrieved from the
+ * **InputArguments** and **OutputArguments** variable below the MethodNode.
+ *
+ * For calling a method, both ``methodId`` and ``objectId`` need to be defined
+ * by their NodeId. This is required because the same MethodNode can be
+ * referenced from multiple objects.
+ *
+ * In this server implementation, when an object is instantiated from a an
+ * ObjectType, all (mandatory) methods are automatically added to the new object
+ * instance. This is done by adding an additional reference to the original
+ * MethodNode. It is however possible to add a custom MethodNode directly to the
+ * object instance. It is also possible to remove a (optional) MethodNode that
+ * exists in the ObjectType from an instance.
+ *
+ * The ``methodId`` can point to a MethodNode that exists in the ObjectType but
+ * not in the object instance. It is resolved to the actual MethodNode of the
+ * object instance by taking the *BrowseName* attribute of the
+ * ``methodId``-MethodNode and looking up the member of the ``objectId`` object
+ * with the same BrowseName.
+ *
+ * The resolved MethodNode then is used to
+ *
+ * - Check permissions for the current Session to call the method
+ * - Obtain the ``UA_MethodCallback`` to execute
+ * - Forwarded as ``methodId`` to said callback
+ *
+ * To showcase the resolution of the MethodNode with an example, consider this
+ * information model::
+ *
+ *      ObjectType                      ObjectType                     Object
+ *    Creature (i=10)  <-isSubTypeOf-  Insect (i=20)  <-hasTypeDef-   Ant (i=30)
+ *          |                               |                            |
+ *     hasComponent                    hasComponent                 hasComponent
+ *          |                               |                            |
+ *          v                               v                            v
+ *       Methods                         Methods                      Methods
+ *    - Walk (i=11)                   - Walk (i=21)                - Walk (i=31)
+ *    - Fly (i=12)                    - Fly (i=22)                 - Amount (i=33)
+ *    - Amount (i=13)                 - Amount (i=23)
+ *
+ * The following table shows what ``methodId`` - ``objectId`` combinations are
+ * allowed to be used as parameters for the Call service and the resolved
+ * ``methodId``.
+ *
+ * ========  ========  ====================================  =================
+ * objectId  methodId  Corresponds to in OO-languages        Resolved methodId
+ * ========  ========  ====================================  =================
+ * i=30      i=31      ``Ant a; a.Walk();``                  i=31
+ * i=30      i=21      ``Ant a; Insect i = a; i.Walk();``    i=31
+ * i=30      i=11      ``Ant a; Creature c = a; c.Walk();``  i=31
+ * i=20      i=23      ``Insect::Amount();``                 i=23
+ * i=10      i=13      ``Creature::Amount();``               i=13
+ * ========  ========  ====================================  =================
+ *
+ * The next table shows ``methodId`` - ``objectId`` combinations that are not
+ * allowed. Note that an ObjecType cannot execute a methodId from a subtype or
+ * instance.
+ *
+ * ========  ========  =====================================================
+ * objectId  methodId  Reason
+ * ========  ========  =====================================================
+ * i=30      i=22      Object "Ant" does not own a method "Fly"
+ * i=30      i=12      Object "Ant" does not own a method "Fly"
+ * i=10      i=23      The method is not owned by the object type "Creature"
+ * i=20      i=13      The method is not owned by the object type "Insect"
+ * ========  ========  ===================================================== */
 
 #ifdef UA_ENABLE_METHODCALLS
 UA_CallMethodResult UA_EXPORT UA_THREADSAFE
@@ -887,7 +982,7 @@ UA_Server_setVariableNode_callbackValueSource(UA_Server *server,
 /* Deprecated API */
 typedef UA_CallbackValueSource UA_DataSource;
 #define UA_Server_setVariableNode_dataSource(server, nodeId, dataSource) \
-    UA_Server_setVariableNode_callbackValueSource(server, nodeId, dataSource);
+    UA_Server_setVariableNode_callbackValueSource(server, nodeId, dataSource)
 
 /* Deprecated API */
 typedef UA_ValueSourceNotifications UA_ValueCallback;
@@ -917,7 +1012,10 @@ UA_Server_addVariableTypeNode(UA_Server *server,
 
 /**
  * MethodNode
- * ~~~~~~~~~~ */
+ * ~~~~~~~~~~
+ * Please refer to the :ref:`Method Service Set <server-method-call>` to get
+ * information about which MethodNodes may get executed and would thus require
+ * callbacks to be registered. */
 
 typedef UA_StatusCode
 (*UA_MethodCallback)(UA_Server *server,
@@ -1899,17 +1997,6 @@ UA_Server_readObjectProperty(UA_Server *server, const UA_NodeId objectId,
  *
  * The :ref:`tutorials` provide a good starting point for this. */
 
-#include <open62541/plugin/log.h>
-#include <open62541/plugin/certificategroup.h>
-#include <open62541/plugin/nodestore.h>
-#include <open62541/plugin/eventloop.h>
-#include <open62541/plugin/accesscontrol.h>
-#include <open62541/plugin/securitypolicy.h>
-
-#ifdef UA_ENABLE_HISTORIZING
-#include <open62541/plugin/historydatabase.h>
-#endif
-
 struct UA_ServerConfig {
     void *context; /* Used to attach custom data to a server config. This can
                     * then be retrieved e.g. in a callback that forwards a
@@ -1974,7 +2061,7 @@ struct UA_ServerConfig {
      *
      * See the section on :ref:`generic-types`. Examples for working with custom
      * data types are provided in ``/examples/custom_datatype/``. */
-    const UA_DataTypeArray *customDataTypes;
+    UA_DataTypeArray *customDataTypes;
 
     /* EventLoop
      * ~~~~~~~~~
@@ -1983,6 +2070,18 @@ struct UA_ServerConfig {
      * be destroyed when the config is cleaned up. */
     UA_EventLoop *eventLoop;
     UA_Boolean externalEventLoop; /* The EventLoop is not deleted with the config */
+
+    /* Application Notification
+     * ~~~~~~~~~~~~~~~~~~~~~~~~
+     * The notification callbacks can be NULL. The global callback receives all
+     * notifications. The specialized callbacks receive only the subset
+     * indicated by their name. */
+    UA_ServerNotificationCallback globalNotificationCallback;
+    UA_ServerNotificationCallback lifecycleNotificationCallback;
+    UA_ServerNotificationCallback secureChannelNotificationCallback;
+    UA_ServerNotificationCallback sessionNotificationCallback;
+    UA_ServerNotificationCallback serviceNotificationCallback;
+    UA_ServerNotificationCallback subscriptionNotificationCallback;
 
     /* Networking
      * ~~~~~~~~~~

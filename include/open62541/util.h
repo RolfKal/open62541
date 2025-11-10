@@ -9,6 +9,7 @@
 #define UA_HELPER_H_
 
 #include <open62541/types.h>
+#include <open62541/types_generated.h>
 #include <open62541/plugin/log.h>
 
 _UA_BEGIN_DECLS
@@ -84,6 +85,23 @@ UA_Guid UA_EXPORT
 UA_Guid_random(void);   /* no cryptographic entropy */
 
 /**
+ * Translate between Namespace and internal DataType definitions
+ * -------------------------------------------------------------
+ */
+
+UA_StatusCode
+UA_DataType_fromStructureDefinition(UA_DataType *type,
+                                    const UA_StructureDefinition *sd,
+                                    const UA_NodeId typeId,
+                                    const UA_String typeName,
+                                    const UA_DataTypeArray *customTypes);
+
+UA_EXPORT UA_StatusCode
+UA_DataType_toStructureDefinition(const UA_DataType *type,
+                                  UA_StructureDefinition *sd);
+
+
+/**
  * Key Value Map
  * -------------
  * Helper functions to work with configuration parameters in an array of
@@ -91,6 +109,7 @@ UA_Guid_random(void);   /* no cryptographic entropy */
  * methods below that accept a `const UA_KeyValueMap` as an argument also accept
  * NULL for that argument and treat it as an empty map. */
 
+/* The layout is identical to UA_AdditionalParametersType (casting possible) */
 typedef struct {
     size_t mapSize;
     UA_KeyValuePair *map;
@@ -136,8 +155,14 @@ UA_KeyValueMap_setShallow(UA_KeyValueMap *map,
 UA_EXPORT UA_StatusCode
 UA_KeyValueMap_setScalar(UA_KeyValueMap *map,
                          const UA_QualifiedName key,
-                         void * UA_RESTRICT p,
+                         const void * UA_RESTRICT p,
                          const UA_DataType *type);
+
+UA_EXPORT UA_StatusCode
+UA_KeyValueMap_setScalarShallow(UA_KeyValueMap *map,
+                                const UA_QualifiedName key,
+                                void * UA_RESTRICT p,
+                                const UA_DataType *type);
 
 /* Returns a pointer to the value or NULL if the key is not found */
 UA_EXPORT const UA_Variant *
@@ -311,12 +336,12 @@ UA_readNumberWithBase(const UA_Byte *buf, size_t buflen,
  * the following (in addition to whitespaces and unprintable ASCII control
  * codes).::
  *
- *    ' ' - %20     '(' - %28     '>' - %3E
- *    '"' - %22     ')' - %29     '[' - %5B
- *    '#' - %23     ',' - %2C     '\' - %5C
- *    '%' - %25     '/' - %2F     ']' - %5D
- *    '&' - %26     ';' - %3B     '`' - %60
- *    ''' - %27     '<' - %3C
+ *    ' ' - %20     '(' - %28     '<' - %3C
+ *    '"' - %22     ')' - %29     '>' - %3E
+ *    '#' - %23     ',' - %2C     '[' - %5B
+ *    '%' - %25     '/' - %2F     '\' - %5C
+ *    '&' - %26     ':' - %3A     ']' - %5D
+ *    ''' - %27     ';' - %3B     '`' - %60
  *
  * .. _relativepath:
  *

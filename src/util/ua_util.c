@@ -477,7 +477,7 @@ UA_KeyValueMap_setShallow(UA_KeyValueMap *map,
 UA_StatusCode
 UA_KeyValueMap_setScalar(UA_KeyValueMap *map,
                          const UA_QualifiedName key,
-                         void * UA_RESTRICT p,
+                         const void * UA_RESTRICT p,
                          const UA_DataType *type) {
     if(p == NULL || type == NULL)
         return UA_STATUSCODE_BADINVALIDARGUMENT;
@@ -485,8 +485,21 @@ UA_KeyValueMap_setScalar(UA_KeyValueMap *map,
     UA_Variant_init(&v);
     v.type = type;
     v.arrayLength = 0;
-    v.data = p;
+    v.data = (void*)(uintptr_t)p;
     return UA_KeyValueMap_set(map, key, &v);
+}
+
+UA_StatusCode
+UA_KeyValueMap_setScalarShallow(UA_KeyValueMap *map, const UA_QualifiedName key,
+                                void *UA_RESTRICT p, const UA_DataType *type) {
+    if(p == NULL || type == NULL)
+        return UA_STATUSCODE_BADINVALIDARGUMENT;
+    UA_Variant v;
+    UA_Variant_init(&v);
+    v.type = type;
+    v.arrayLength = 0;
+    v.data = p;
+    return UA_KeyValueMap_setShallow(map, key, &v);
 }
 
 const UA_Variant *
@@ -832,11 +845,11 @@ UA_String_unescape(UA_String *str, UA_Boolean copyEscape, UA_Escaping esc) {
                 byte <<= 4;
 
                 if(pos[2] >= 'a')
-                    byte += pos[2] - ('a' - 10);
+                    byte += (u8)(pos[2] - ('a' - 10));
                 else if(pos[2] >= 'A')
-                    byte += pos[2] - ('A' - 10);
+                    byte += (u8)(pos[2] - ('A' - 10));
                 else
-                    byte += pos[2] - '0';
+                    byte += (u8)(pos[2] - '0');
 
                 pos += 2;
                 *writepos++ = byte;

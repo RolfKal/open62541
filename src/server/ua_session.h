@@ -55,7 +55,7 @@ struct UA_Session {
     UA_Double timeout; /* in ms */
     UA_DateTime validTill;
 
-    UA_KeyValueMap *attributes;
+    UA_KeyValueMap attributes;
 
     /* TODO: Currently unused */
     UA_UInt32 maxRequestMessageSize;
@@ -94,13 +94,18 @@ struct UA_Session {
 
 void UA_Session_init(UA_Session *session);
 void UA_Session_clear(UA_Session *session, UA_Server *server);
-void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel);
-void UA_Session_detachFromSecureChannel(UA_Session *session);
+void UA_Session_attachToSecureChannel(UA_Server *server, UA_Session *session,
+                                      UA_SecureChannel *channel);
+void UA_Session_detachFromSecureChannel(UA_Server *server, UA_Session *session);
 UA_StatusCode UA_Session_generateNonce(UA_Session *session);
 
 /* If any activity on a session happens, the timeout is extended */
 void UA_Session_updateLifetime(UA_Session *session, UA_DateTime now,
                                UA_DateTime nowMonotonic);
+
+void
+notifySession(UA_Server *server, UA_Session *session,
+              UA_ApplicationNotificationType type);
 
 /**
  * Subscription handling
